@@ -1,6 +1,9 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-import open3d as o3d
+try:
+    import open3d as o3d
+except ImportError:
+    o3d = None
 import random
 import copy
 from scipy.spatial import cKDTree

@@ -1,0 +1,23 @@
+{
+  "aliases": {
+    "llama-4-maverick": "meta-llama/llama-4-maverick:free",
+    "gpt-5-mini": "openai/gpt-5-image-mini",
+    "qwen3_235b_thinking": "qwen/qwen3-vl-235b-a22b-thinking",
+    "qwen3_235b_instruct": "qwen/qwen3-vl-235b-a22b-instruct",
+    "qwen3_30b_instruct": "qwen/qwen3-vl-30b-a3b-instruct",
+    "qwen3_30b_thinking": "qwen/qwen3-vl-30b-a3b-thinking",
+    "qwen3_8b_instruct": "qwen/qwen3-vl-8b-instruct",
+    "qwen3_8b_thinking": "qwen/qwen3-vl-8b-thinking",
+    "openai/gpt-5-nano": "openai/gpt-5-nano",
+    "gpt-4o-2024-11-20": "openai/gpt-4o-2024-11-20",
+    "nemotron-nano": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "llama-4-scout": "meta-llama/llama-4-scout:free",
+    "gemini-2.0-flash": "google/gemini-2.0-flash-exp:free",
+    "gemma-3-27b": "google/gemma-3-27b-it:free",
+    "deepseek-r1": "deepseek/deepseek-r1:free",
+    "gemini-2.0-flash-lite": "openrouter/google/gemini-2.0-flash-lite-001:free",
+    "gpt-4o-mini": "openai/gpt-4o-mini",
+    "q": "quit"
+  },
+  "default_alias": "gpt-4o-mini"
+}

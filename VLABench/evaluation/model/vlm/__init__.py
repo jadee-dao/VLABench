@@ -7,3 +7,8 @@ from .minicpm import *
 from .qwen_vl import *
 from .gemini import *
 from .claude import *
+from .openrouter import *
+# from .localhost import *
+from .speculative_decoding import *
+from .fastvlm import *
+

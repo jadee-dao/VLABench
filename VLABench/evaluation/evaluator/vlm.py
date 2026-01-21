@@ -22,7 +22,7 @@ class VLMEvaluator(Evaluator):
         """
         super().__init__(tasks, n_episodes)
         self.data_path = data_path
-        assert os.path.exists(data_path), "Data path does not exist"
+        assert os.path.exists(data_path), f"Data path {data_path} does not exist"
         self.save_path = save_path
         if not os.path.exists(save_path):
             os.makedirs(save_path)
@@ -93,8 +93,8 @@ class VLMEvaluator(Evaluator):
         return model_result_save_path
     
     def load_single_input(self, task_name, example_num):
-        input_pic_path = os.path.join(self.data_path, task_name, "example"+ str(example_num), 'input/input.png')
-        input_pic_gt_path = os.path.join(self.data_path, task_name, "example"+ str(example_num), 'input/input_mask.png')
+        input_pic_path = os.path.join(self.data_path, task_name, "example"+ str(example_num), 'input/input_0.png')
+        input_pic_gt_path = os.path.join(self.data_path, task_name, "example"+ str(example_num), 'input/input_mask0.png')
         input_instruction_path = os.path.join(self.data_path, task_name, "example"+ str(example_num), 'input/instruction.txt')
 
         input_pic = input_pic_path
@@ -110,10 +110,26 @@ class VLMEvaluator(Evaluator):
         return gt_operation_sequence
     
     def get_single_anwer(self, task_name, example_num, vlm, few_shot_num = 0,with_CoT=False):
-        outputs = vlm.evaluate(self.build_input(task_name, example_num, few_shot_num), self.language, with_CoT=with_CoT)
-        if not isinstance(outputs, dict):
-            return {"format_error": outputs}
-        return outputs
+        max_retries = 1
+        retries = 0
+        start_time = time.time()
+        last_output = None
+
+        while retries <= max_retries:
+            outputs = vlm.evaluate(self.build_input(task_name, example_num, few_shot_num), self.language, with_CoT=with_CoT)
+            # success when outputs is a dict
+            if isinstance(outputs, dict):
+                total_time = time.time() - start_time
+                outputs["answer_clock"] = total_time
+                outputs["retries"] = retries
+                return outputs
+
+        last_output = outputs
+        if retries >= max_retries:
+            total_time = time.time() - start_time
+            return {"format_error": last_output, "answer_clock": total_time, "retries": retries}
+        retries += 1
+        time.sleep(1 * (2 ** (retries - 1)))  # exponential backoff and retry
     
     def check_filled_output(self, answer):
         if any([key in answer for key in ["skill_sequence", "format_error"]]):
@@ -151,8 +167,9 @@ class VLMEvaluator(Evaluator):
         test_example_list = []
         is_resuming = False
         existing_num = 0
+        max_episodes = self.n_episodes if self.n_episodes > 0 else 1e9
         for task_name in task_list:
-            for example_num in range(len(os.listdir(os.path.join(self.data_path, task_name)))):
+            for example_num in range(min(max_episodes, len(os.listdir(os.path.join(self.data_path, task_name))))):
                 if task_name in model_output and str(example_num) in model_output[task_name]:
                     if self.check_filled_output(model_output[task_name][str(example_num)]):
                         is_resuming = True
@@ -230,10 +247,11 @@ class VLMEvaluator(Evaluator):
             json.dump(model_output, f, ensure_ascii=False, indent=4)
         print(Fore.YELLOW + Style.BRIGHT + "working end at " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
-    def get_final_score_dict(self, vlm_name, few_shot_num=0, with_CoT=False):
-        output_file = os.path.join(self.get_result_save_path(vlm_name, few_shot_num, with_CoT), "output.json")
+    def get_final_score_dict(self, vlm_name, few_shot_num=0, with_CoT=False, eval_dim="misc"):
+        output_file = os.path.join(self.get_result_save_path(vlm_name, few_shot_num, with_CoT, eval_dim), "output.json")
         if not os.path.exists(output_file):
-            print(Fore.RED + Style.BRIGHT + "output file not exist for model: ", vlm_name, " few_shot_num: ", few_shot_num, " with_CoT: ", with_CoT)
+            print(Fore.RED + Style.BRIGHT + "output file not exist for model: ", vlm_name, " few_shot_num: ",
+                  few_shot_num, " with_CoT: ", with_CoT, " eval_dim: ", eval_dim)
             return None
         with open(output_file) as f:
             model_output = json.load(f)
@@ -255,7 +273,12 @@ class VLMEvaluator(Evaluator):
                         "entity_match_score": 0,
                         "skill_with_entity_match_score": 0,
                         "exact_match_score": 0,
-                        "total_score": 0
+                        "total_score": 0,
+                        "runtime_stats": {
+                            "retries": model_output[task_name][example_num].get("retries", 0),
+                            "answer_clock": model_output[task_name][example_num].get("answer_clock", None)
+                        },
+                        "logprobs": model_output[task_name][example_num].get("logprobs", {}).get("avg_nll", None)
                     }
                     continue
                 standard_output = self.load_single_output(task_name, example_num)["skill_sequence"]
@@ -264,16 +287,32 @@ class VLMEvaluator(Evaluator):
                     dependency = "Sequential" if task_name not in self.seq_independent_task else "Seq-independent"
                     example_score = get_final_score(standard_output, model_skill_sequence, dependency=dependency)
                     final_score_dict[task_name][example_num] = example_score
+                    final_score_dict[task_name][example_num]["runtime_stats"] = {
+                        "retries": model_output[task_name][example_num].get("retries", 0),
+                        "answer_clock": model_output[task_name][example_num].get("answer_clock", None)
+                    }
+                    final_score_dict[task_name][example_num]["logprobs"] = model_output[task_name][example_num].get("logprobs", {}).get("avg_nll", None)
+                    final_score_dict[task_name][example_num]["hidden_stats"] = model_output[task_name][example_num].get("hidden_stats", None)
+                    final_score_dict[task_name][example_num]["agreement_rate"] = model_output[task_name][example_num].get("agreement_rate", None)
+                    final_score_dict[task_name][example_num]["agreement_samples"] = model_output[task_name][example_num].get("agreement_samples", None)
                 except:
                     final_score_dict[task_name][example_num] = {
                         "skill_match_score": 0,
                         "entity_match_score": 0,
                         "skill_with_entity_match_score": 0,
                         "exact_match_score": 0,
-                        "total_score": 0
+                        "total_score": 0,
+                        "runtime_stats": {
+                            "retries": model_output[task_name][example_num].get("retries", 0),
+                            "answer_clock": model_output[task_name][example_num].get("answer_clock", None)
+                        },
+                        "logprobs": None,
+                        "hidden_stats": None,
+                        "agreement_rate": None,
+                        "agreement_samples": None
                     }
                 
-        final_score_dict_save_path = os.path.join(self.get_result_save_path(vlm_name, few_shot_num, with_CoT), "final_score.json")
+        final_score_dict_save_path = os.path.join(self.get_result_save_path(vlm_name, few_shot_num, with_CoT, eval_dim), "final_score.json")
         with open(final_score_dict_save_path, 'w', encoding="utf-8") as f:
             json.dump(final_score_dict, f, ensure_ascii=False, indent=4)
         return final_score_dict

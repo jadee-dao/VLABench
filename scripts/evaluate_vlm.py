@@ -3,6 +3,7 @@ import json
 import os
 from VLABench.evaluation.evaluator import VLMEvaluator
 from VLABench.evaluation.model.vlm import *
+from dotenv import load_dotenv
 
 def initialize_model(model_name, *args, **kwargs):
     cls = globals().get(model_name)
@@ -13,18 +14,21 @@ def initialize_model(model_name, *args, **kwargs):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run VLM benchmark with specified model and parameters.")
-    parser.add_argument("--vlm_name", type=str, default="GPT_4v", choices=["GPT_4v", "Qwen2_VL", "InternVL2", "MiniCPM_V2_6", "GLM4v", "Llava_NeXT", "Gemini", "Claude"], help="Name of the model class to instantiate")
+    parser.add_argument("--vlm_name", type=str, default="GPT_4v", choices=["GPT_4v", "Qwen2_VL", "InternVL2", "MiniCPM_V2_6", "GLM4v", "Llava_NeXT", "Gemini", "Claude", "OpenRouter", "Local", "Speculative_Decoding", "FastVLM_1_5B"], help="Name of the model class to instantiate")
     parser.add_argument("--save_interval", type=int, default=1, help="Interval for saving benchmark results")
     parser.add_argument("--few-shot-num", type=int, default=0, help="Number of few-shot examples")
-    parser.add_argument("--eval-dimension", nargs="+", type=str, default=["M&T", "CommonSense", "Semantic", "Spatial", "PhysicalLaw", "Complex"], help="evaluation dimensions")
+    parser.add_argument("--eval-dimension", nargs="+", type=str, default=["M&T", "CommonSense", "Semantic", "Spatial", "PhysicsLaw", "Complex"], help="evaluation dimensions")
     parser.add_argument("--tasks", nargs='+', default=None, help="Specific tasks to run, default is None, meaning evaluate on all the tasks")
     parser.add_argument("--n-episodes", type=int, default=100, help="Number of episodes to evaluate for a task")
     parser.add_argument("--with-cot", default=False, action="store_true", help="Whether to use chain of thought")
+    parser.add_argument("--save_dir", type=str, default="/home/jadelynn/results", help="Directory to save evaluation results")
     return parser.parse_args()
 
 def main():
     args = parse_args()
     assert len(args.eval_dimension) > 0, "Please specify the evaluation dimension"
+    vlm = initialize_model(args.vlm_name)
+    model_identifier = getattr(vlm, "name", args.vlm_name)
     
     for eval_dim in args.eval_dimension:
         if args.tasks is None:
@@ -37,10 +41,9 @@ def main():
             data_path=os.path.join(os.getenv("VLABENCH_ROOT"), "../dataset", f"vlm_evaluation_v1.0/{eval_dim}"),
             save_path=os.path.join(os.getenv("VLABENCH_ROOT"), "../logs/vlm"),
         )
-        
-        vlm = initialize_model(args.vlm_name) 
-        
-        if args.task_list_json is not None:
+
+        task_list_json = getattr(args, "task_list_json", None)
+        if task_list_json is not None:
             try:
                 pwd = os.getcwd()
                 task_list_path = os.path.join(pwd, "../../configs/benchmark/taskList", args.task_list_json)
@@ -58,10 +61,11 @@ def main():
             with_CoT=args.with_cot,
             eval_dim=eval_dim,
         )
-        result=evaluator.get_final_score_dict(args.vlm_name)
-        os.makedirs(os.path.join(args.save_dir, args.vlm_name), exist_ok=True)
-        with open(os.path.join(args.save_dir, args.vlm_name, f"{eval_dim}_result.json"), "w") as f:
+        result = evaluator.get_final_score_dict(model_identifier, few_shot_num=args.few_shot_num, with_CoT=args.with_cot, eval_dim=eval_dim)
+        os.makedirs(os.path.join(args.save_dir, model_identifier), exist_ok=True)
+        with open(os.path.join(args.save_dir, model_identifier, f"{eval_dim}_result.json"), "w") as f:
             json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
+    load_dotenv()
     main()

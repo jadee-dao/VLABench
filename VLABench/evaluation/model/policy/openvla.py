@@ -16,7 +16,7 @@ CAMERA_VIEW_INDEX={
     "cluster_toy": 2
 }
 
-def copy_file_content(content_file, target_file):
+def copy_file_content(content_file, target_file): # TODO: Load from hugging face
     with open(content_file, "r") as f:
         content = f.read()
     with open(target_file, "w") as f:

@@ -1,10 +1,15 @@
 '''
 Pass the local image base64 code to the OpenAI API to get the image captioning result.
 '''
+import tqdm
 from openai import OpenAI
 import os
 import base64
 import json
+
+from qwen_vl_utils import process_vision_info
+
+from transformers import AutoProcessor
 
 def convert_base64_to_data_uri(base64_image):
     def _get_mime_type_from_data_uri(base64_image):
@@ -29,7 +34,11 @@ def encode_image(image_path):
   with open(image_path, "rb") as image_file:
     return base64.b64encode(image_file.read()).decode('utf-8')
 
-def query_gpt4_v(prompt, history=[], model="gpt-4-turbo", **kwargs):
+def query_gpt4_v(prompt,
+                 history=[],
+                 model="gpt-4-turbo",
+                 logprobs=False,
+                 **kwargs):
     client = OpenAI(
         api_key=kwargs.get("api_key", os.environ.get("OPENAI_API_KEY", None)), 
         base_url=kwargs.get("base_url", os.environ.get("OPENAI_BASE_URL", None))
@@ -46,13 +55,23 @@ def query_gpt4_v(prompt, history=[], model="gpt-4-turbo", **kwargs):
                         model=model,
                         messages=messages,
                         max_tokens=1000,
+                        logprobs=logprobs,
                         )
             break
         except Exception as e:
             print(f"openai error, {e}")
     message = response.choices[0].message
     content = message.content
-    return content
+    if logprobs:
+        try:
+            logprobs = response.choices[0].logprobs
+        except Exception as e:
+            print(f"openai error, {e}")
+            content, logprobs = None, None
+        
+        return content, logprobs
+    else:
+        return content
 
 def build_prompts(text, image_paths):
     prompt = list()
@@ -75,3 +94,66 @@ def build_prompt_with_tilist(text_image_list):
             uri = convert_base64_to_data_uri(base64image)
             prompt.append({"type": "image_url", "image_url": {"url": uri}})
     return prompt
+
+def generate_resp_with_vllm(prompt,
+                 history=[],
+                 model="gpt-4-turbo",
+                 logprobs=False,
+                 **kwargs):
+    messages = []
+    for q,a in history:
+        messages.append({"role": "user", "content": q})
+        messages.append({"role": "assistant", "content": a})
+    messages.append({"role": "user", "content": prompt})
+
+    client = OpenAI(
+        api_key=kwargs.get("api_key", "EMPTY"), 
+        base_url=kwargs.get("base_url", os.environ.get("OPENAI_BASE_URL", None))
+    )
+
+    extra_body = {}
+    if logprobs:
+        extra_body["prompt_logprobs"] = 0
+
+    response = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        max_tokens=1000,
+                        extra_body=extra_body
+                        )
+
+    message = response.choices[0].message
+    content = message.content
+    
+    if logprobs:
+        try:
+            logprobs = response.prompt_logprobs # logprobs list of dicts (logprob, rank, decoded_token)
+        except Exception as e:
+            print(f"openai error, {e}")
+            content, logprobs = None, None
+        
+        return content, logprobs
+    else:
+        return content
+
+def prepare_inputs_for_vllm(messages, processor):
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    # qwen_vl_utils 0.0.14+ required
+    image_inputs, video_inputs, video_kwargs = process_vision_info(
+        messages,
+        image_patch_size=processor.image_processor.patch_size,
+        return_video_kwargs=True,
+        return_video_metadata=True
+    )
+
+    mm_data = {}
+    if image_inputs is not None:
+        mm_data['image'] = image_inputs
+    if video_inputs is not None:
+        mm_data['video'] = video_inputs
+
+    return {
+        'prompt': text,
+        'multi_modal_data': mm_data,
+        'mm_processor_kwargs': video_kwargs
+    }

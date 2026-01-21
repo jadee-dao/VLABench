@@ -130,12 +130,15 @@ class Evaluator:
         success = False
         info = {}
         frames_to_save = []
+        instruction_text = None
         last_action = None
         i = 0
         robot_frame = env.get_robot_frame_position()
         while i < max_episode_length:
             observation = env.get_observation(require_pcd=False)
             observation["instruction"] = env.task.get_instruction()
+            if instruction_text is None:
+                instruction_text = observation["instruction"]
             ee_state = observation["ee_state"]
             observation['robot_frame'] = robot_frame
             if last_action is None:
@@ -173,6 +176,8 @@ class Evaluator:
         info["consumed_step"] = i
         info["intention_score"] = intention_score
         info["progress_score"] = progress_score
+        if instruction_text is not None:
+            info["instruction"] = instruction_text
         
         env.close()
         if self.save_dir is not None and self.visulization:
